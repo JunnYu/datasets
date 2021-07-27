@@ -165,12 +165,17 @@ def _cast_to_python_objects(obj: Any) -> Tuple[Any, bool]:
     if config.TORCH_AVAILABLE and "torch" in sys.modules:
         import torch
 
+    if config.PADDLE_AVAILABLE and "paddle" in sys.modules:
+        import paddle
+
     if config.JAX_AVAILABLE and "jax" in sys.modules:
         import jax.numpy as jnp
 
     if isinstance(obj, np.ndarray):
         return obj.tolist(), True
     elif config.TORCH_AVAILABLE and "torch" in sys.modules and isinstance(obj, torch.Tensor):
+        return obj.detach().cpu().numpy().tolist(), True
+    elif config.PADDLE_AVAILABLE and "paddle" in sys.modules and isinstance(obj, paddle.Tensor):
         return obj.detach().cpu().numpy().tolist(), True
     elif config.TF_AVAILABLE and "tensorflow" in sys.modules and isinstance(obj, tf.Tensor):
         return obj.numpy().tolist(), True

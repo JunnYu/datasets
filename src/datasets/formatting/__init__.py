@@ -85,6 +85,14 @@ else:
     _torch_error = ValueError("PyTorch needs to be installed to be able to return PyTorch tensors.")
     _register_unavailable_formatter(_torch_error, "torch", aliases=["pt", "pytorch"])
 
+if config.PADDLE_AVAILABLE:
+    from .paddle_formatter import PaddleFormatter
+
+    _register_formatter(PaddleFormatter, "paddle", aliases=["paddle"])
+else:
+    _paddle_error = ValueError("Paddle needs to be installed to be able to return Paddle tensors.")
+    _register_unavailable_formatter(_paddle_error, "paddle", aliases=["paddle"])
+
 if config.TF_AVAILABLE:
     from .tf_formatter import TFFormatter
 

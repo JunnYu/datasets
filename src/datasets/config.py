@@ -41,6 +41,7 @@ PYARROW_VERSION = importlib_metadata.version("pyarrow")
 
 USE_TF = os.environ.get("USE_TF", "AUTO").upper()
 USE_TORCH = os.environ.get("USE_TORCH", "AUTO").upper()
+USE_PADDLE = os.environ.get("USE_PADDLE", "AUTO").upper()
 USE_JAX = os.environ.get("USE_JAX", "AUTO").upper()
 
 TORCH_VERSION = "N/A"
@@ -56,6 +57,20 @@ if USE_TORCH in ENV_VARS_TRUE_AND_AUTO_VALUES and USE_TF not in ENV_VARS_TRUE_VA
             pass
 else:
     logger.info("Disabling PyTorch because USE_TF is set")
+
+PADDLE_VERSION = "N/A"
+PADDLE_AVAILABLE = False
+
+if USE_PADDLE in ENV_VARS_TRUE_AND_AUTO_VALUES and USE_TF not in ENV_VARS_TRUE_VALUES:
+    PADDLE_AVAILABLE = importlib.util.find_spec("paddle") is not None
+    if PADDLE_AVAILABLE:
+        try:
+            PADDLE_VERSION = importlib_metadata.version("paddle")
+            logger.info(f"Paddle version {PADDLE_VERSION} available.")
+        except importlib_metadata.PackageNotFoundError:
+            pass
+else:
+    logger.info("Disabling Paddle because USE_TF is set")
 
 TF_VERSION = "N/A"
 TF_AVAILABLE = False
