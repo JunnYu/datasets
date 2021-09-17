@@ -498,11 +498,13 @@ def prepare_module(
         return output
     else:
         # Try github (canonical datasets/metrics) and then HF Hub (community datasets)
-
         combined_path_abs = relative_to_absolute_path(combined_path)
         expected_dir_for_combined_path_abs = os.path.dirname(combined_path_abs)
         try:
-            head_hf_s3(path, filename=name, dataset=dataset, max_retries=download_config.max_retries)
+            try:
+                head_hf_s3(path, filename=name, dataset=dataset, max_retries=download_config.max_retries)
+            except Exception:
+                pass
             script_version = str(script_version) if script_version is not None else None
             if path.count("/") == 0:  # canonical datasets/metrics: github path
                 file_path = hf_github_url(path=path, name=name, dataset=dataset, version=script_version)
@@ -513,7 +515,7 @@ def prepare_module(
                         raise FileNotFoundError(
                             f"Couldn't find a directory or a {resource_type} named '{path}' using version {script_version}. "
                             f"It doesn't exist locally at {expected_dir_for_combined_path_abs} or remotely at {file_path}"
-                        )
+                        ) from None
                     else:
                         github_file_path = file_path
                         file_path = hf_github_url(path=path, name=name, dataset=dataset, version="master")
@@ -527,7 +529,7 @@ def prepare_module(
                             raise FileNotFoundError(
                                 f"Couldn't find a directory or a {resource_type} named '{path}'. "
                                 f"It doesn't exist locally at {expected_dir_for_combined_path_abs} or remotely at {github_file_path}"
-                            )
+                            ) from None
             elif path.count("/") == 1:  # users datasets/metrics: s3 path (hub for datasets and s3 for metrics)
                 file_path = hf_hub_url(path=path, name=name, version=script_version)
                 if not dataset:
@@ -544,11 +546,11 @@ def prepare_module(
                         dataset_info = hf_api.dataset_info(
                             repo_id=path, revision=script_version, token=download_config.use_auth_token
                         )
-                    except Exception:
+                    except Exception as exc:
                         raise FileNotFoundError(
                             f"Couldn't find a directory or a {resource_type} named '{path}'. "
                             f"It doesn't exist locally at {expected_dir_for_combined_path_abs} or remotely on {hf_api.endpoint}/datasets"
-                        )
+                        ) from exc
                     resolved_data_files = _resolve_data_files_in_dataset_repository(
                         dataset_info,
                         data_files if data_files is not None else "*",
@@ -558,7 +560,7 @@ def prepare_module(
                     if not infered_module_name:
                         raise FileNotFoundError(
                             f"No data files found in dataset repository '{path}'. Local directory at {expected_dir_for_combined_path_abs} doesn't exist either."
-                        )
+                        ) from None
                     output = prepare_packaged_module(infered_module_name)
                     if return_resolved_file_path:
                         output += (None,)
@@ -798,7 +800,7 @@ def load_metric(
         config_name (Optional ``str``): selecting a configuration for the metric (e.g. the GLUE metric has a configuration for each subset)
         process_id (Optional ``int``): for distributed evaluation: id of the process
         num_process (Optional ``int``): for distributed evaluation: total number of processes
-        cache_dir (Optional str): path to store the temporary predictions and references (default to `~/.cache/metrics/`)
+        cache_dir (Optional str): path to store the temporary predictions and references (default to `~/.cache/huggingface/metrics/`)
         experiment_id (``str``): A specific experiment id. This is used if several distributed evaluations share the same file system.
             This is useful to compute metrics in distributed setups (in particular non-additive metrics like F1).
         keep_in_memory (bool): Whether to store the temporary results in memory (defaults to False)
@@ -883,7 +885,7 @@ def load_dataset_builder(
         name (:obj:`str`, optional): Defining the name of the dataset configuration.
         data_dir (:obj:`str`, optional): Defining the data_dir of the dataset configuration.
         data_files (:obj:`str` or :obj:`Sequence` or :obj:`Mapping`, optional): Path(s) to source data file(s).
-        cache_dir (:obj:`str`, optional): Directory to read/write data. Defaults to "~/datasets".
+        cache_dir (:obj:`str`, optional): Directory to read/write data. Defaults to "~/.cache/huggingface/datasets".
         features (:class:`Features`, optional): Set the features type to use for this dataset.
         download_config (:class:`~utils.DownloadConfig`, optional): Specific download configuration parameters.
         download_mode (:class:`GenerateMode`, default ``REUSE_DATASET_IF_EXISTS``): Download/generate mode.
@@ -1041,7 +1043,7 @@ def load_dataset(
             If None, will return a `dict` with all splits (typically `datasets.Split.TRAIN` and `datasets.Split.TEST`).
             If given, will return a single Dataset.
             Splits can be combined and specified like in tensorflow-datasets.
-        cache_dir (:obj:`str`, optional): Directory to read/write data. Defaults to "~/datasets".
+        cache_dir (:obj:`str`, optional): Directory to read/write data. Defaults to "~/.cache/huggingface/datasets".
         features (:class:`Features`, optional): Set the features type to use for this dataset.
         download_config (:class:`~utils.DownloadConfig`, optional): Specific download configuration parameters.
         download_mode (:class:`GenerateMode`, default ``REUSE_DATASET_IF_EXISTS``): Download/generate mode.

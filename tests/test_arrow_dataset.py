@@ -3,9 +3,11 @@ import itertools
 import json
 import os
 import pickle
+import re
 import tempfile
 from functools import partial
 from unittest import TestCase
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -967,6 +969,33 @@ class BaseDatasetTest(TestCase):
                         self.assertEqual(len(dset_test2.cache_files), 1 - int(in_memory))
                         self.assertNotIn("Loading cached processed dataset", self._caplog.text)
 
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            self._caplog.clear()
+            with self._caplog.at_level(WARNING):
+                with self._create_dummy_dataset(in_memory, tmp_dir) as dset:
+                    with patch("datasets.arrow_dataset.Pool", side_effect=datasets.arrow_dataset.Pool) as mock_pool:
+                        with dset.map(lambda x: {"foo": "bar"}, num_proc=2) as dset_test1:
+                            dset_test1_data_files = list(dset_test1.cache_files)
+                        self.assertEqual(mock_pool.call_count, 1)
+                        with dset.map(lambda x: {"foo": "bar"}, num_proc=2) as dset_test2:
+                            self.assertEqual(dset_test1_data_files, dset_test2.cache_files)
+                            self.assertTrue(
+                                (len(re.findall("Loading cached processed dataset", self._caplog.text)) == 2)
+                                ^ in_memory
+                            )
+                        self.assertEqual(mock_pool.call_count, 2 if in_memory else 1)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            self._caplog.clear()
+            with self._caplog.at_level(WARNING):
+                with self._create_dummy_dataset(in_memory, tmp_dir) as dset:
+                    with dset.map(lambda x: {"foo": "bar"}, num_proc=2) as dset_test1:
+                        dset_test1_data_files = list(dset_test1.cache_files)
+                    with dset.map(lambda x: {"foo": "bar"}, num_proc=2, load_from_cache_file=False) as dset_test2:
+                        self.assertEqual(dset_test1_data_files, dset_test2.cache_files)
+                        self.assertEqual(len(dset_test2.cache_files), (1 - int(in_memory)) * 2)
+                        self.assertNotIn("Loading cached processed dataset", self._caplog.text)
+
         if not in_memory:
             try:
                 self._caplog.clear()
@@ -1133,9 +1162,20 @@ class BaseDatasetTest(TestCase):
                     self.assertEqual(len(dset_filter_first_ten), 10)
                     self.assertDictEqual(dset.features, Features({"filename": Value("string")}))
                     self.assertDictEqual(dset_filter_first_ten.features, Features({"filename": Value("string")}))
-                    # only one cache file since the there is only 10 examples from the 1 processed shard
-                    self.assertEqual(len(dset_filter_first_ten.cache_files), 0 if in_memory else 1)
+                    self.assertEqual(len(dset_filter_first_ten.cache_files), 0 if in_memory else 2)
                     self.assertNotEqual(dset_filter_first_ten._fingerprint, fingerprint)
+
+    def test_filter_caching(self, in_memory):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            self._caplog.clear()
+            with self._caplog.at_level(WARNING):
+                with self._create_dummy_dataset(in_memory, tmp_dir) as dset:
+                    with dset.filter(lambda x, i: i < 5, with_indices=True) as dset_filter_first_five1:
+                        dset_test1_data_files = list(dset_filter_first_five1.cache_files)
+                    with dset.filter(lambda x, i: i < 5, with_indices=True) as dset_filter_first_five2:
+                        self.assertEqual(dset_test1_data_files, dset_filter_first_five2.cache_files)
+                        self.assertEqual(len(dset_filter_first_five2.cache_files), 0 if in_memory else 2)
+                        self.assertTrue(("Loading cached processed dataset" in self._caplog.text) ^ in_memory)
 
     def test_keep_features_after_transform_specified(self, in_memory):
         features = Features(
@@ -1776,8 +1816,8 @@ class BaseDatasetTest(TestCase):
                 self.assertIsInstance(dset[0][col], (tf.Tensor, tf.RaggedTensor))
                 self.assertIsInstance(dset[:2][col], (tf.Tensor, tf.RaggedTensor))
                 self.assertIsInstance(dset[col], (tf.Tensor, tf.RaggedTensor))
-            self.assertEqual(tuple(dset[:2]["vec"].shape), (2, None))
-            self.assertEqual(tuple(dset["vec"][:2].shape), (2, None))
+            self.assertEqual(tuple(dset[:2]["vec"].shape), (2, 3))
+            self.assertEqual(tuple(dset["vec"][:2].shape), (2, 3))
 
             dset.set_format("numpy")
             self.assertIsNotNone(dset[0])
@@ -1956,6 +1996,25 @@ class BaseDatasetTest(TestCase):
                     dset.reset_format()
                     self.assertNotEqual(dset.format, dset2.format)
                     self.assertNotEqual(dset._fingerprint, dset2._fingerprint)
+
+    @require_tf
+    def test_tf_dataset_conversion(self, in_memory):
+        tmp_dir = tempfile.TemporaryDirectory()
+        with self._create_dummy_dataset(in_memory, tmp_dir.name, array_features=True) as dset:
+            tf_dataset = dset.to_tf_dataset(columns="col_3", batch_size=4, shuffle=False, dummy_labels=False)
+            batch = next(iter(tf_dataset))
+            self.assertEqual(batch.shape.as_list(), [4, 4])
+            self.assertEqual(batch.dtype.name, "int64")
+        with self._create_dummy_dataset(in_memory, tmp_dir.name, multiple_columns=True) as dset:
+            tf_dataset = dset.to_tf_dataset(columns="col_1", batch_size=4, shuffle=False, dummy_labels=False)
+            batch = next(iter(tf_dataset))
+            self.assertEqual(batch.shape.as_list(), [4])
+            self.assertEqual(batch.dtype.name, "int64")
+        del tf_dataset  # For correct cleanup
+        try:
+            tmp_dir.cleanup()
+        except PermissionError:
+            pass  # Just leave it, this usually only happens on the CI runner and will get cleaned up anyway
 
 
 class MiscellaneousDatasetTest(TestCase):
